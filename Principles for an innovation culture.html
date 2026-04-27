@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HMI Four Core Principles</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .animate-in { animation: fadeIn 0.7s ease-out forwards; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Custom Icon Component to handle Lucide in HTML environment
+        const Icon = ({ name, className, style }) => {
+            useEffect(() => {
+                lucide.createIcons();
+            }, [name]);
+            return <i data-lucide={name} className={className} style={style}></i>;
+        };
+
+        const App = () => {
+            const [activeCard, setActiveCard] = useState(1);
+            const BRAND_ORANGE = "#ff8b00";
+
+            const principles = [
+                {
+                    id: 1,
+                    title: "Apply First Principles",
+                    subtitle: "Reason from fundamental truths",
+                    icon: "atom",
+                    mainText: "Instead of incrementing on what's already been done with slight variations, start with a clean slate. Break down a complex problem into its most fundamental elements or truths and reason up from there.",
+                    callout: "Diverge & Converge.",
+                    bullets: [
+                        "Try not to be influenced by how it's done today.",
+                        "By definition, innovation and disruption means radical change."
+                    ]
+                },
+                {
+                    id: 2,
+                    title: "Fail Fast & Early",
+                    subtitle: "Aggressive de-risking",
+                    icon: "alert-circle",
+                    mainText: "Always be on the lookout for early fail opportunities and chase them down—eliminate no-starter options early, but only when we have certainty (through rigorous testing).",
+                    callout: "Certainty through rigor.",
+                    bullets: [
+                        "Chase down early fail opportunities.",
+                        "Eliminate no-starter options early with proof."
+                    ]
+                },
+                {
+                    id: 3,
+                    title: "Nothing is Impossible",
+                    subtitle: "The Holy Grail approach",
+                    icon: "target",
+                    mainText: "Nothing is impossible (until you prove it so!) - Aim for the holy grail and work back from there based on constraints.",
+                    callout: "Aim for the Holy Grail.",
+                    bullets: [
+                        "Work backward from the ideal outcome.",
+                        "Identify constraints: physical, technical, cost, time, etc."
+                    ]
+                },
+                {
+                    id: 4,
+                    title: "Assume nothing, test everything",
+                    subtitle: "Evidence over ego",
+                    icon: "search",
+                    mainText: "Assume nothing, test everything, be thorough, leave no stone unturned. Data is king—every idea is a good idea until disproven.",
+                    callout: "Evidence Over Ego.",
+                    bullets: [
+                        "No shortcuts - do the work to have certainty (proof).",
+                        "Craziest half-baked ideas can lead to groundbreaking value.",
+                        "We're not too precious about disproving ideas."
+                    ]
+                }
+            ];
+
+            const teamGoals = [
+                { icon: "users", text: "Align the team on shared goals & design philosophies" },
+                { icon: "user-check", text: "Promote user-centered design" },
+                { icon: "message-square", text: "Encourage honest collaboration and clear communication" },
+                { icon: "compass", text: "Guide decision-making when trade-offs or challenges arise" }
+            ];
+
+            return (
+                <div className="min-h-screen p-4 md:p-8 selection:bg-[#ff8b001a]">
+                    <div className="max-w-6xl mx-auto relative">
+                        
+                        {/* Top Right Badge */}
+                        <div className="absolute -top-4 -right-4 md:top-0 md:right-0 flex flex-col items-center">
+                            <div className="relative flex items-center justify-center">
+                                <Icon name="hexagon" className="w-20 h-20" style={{ color: BRAND_ORANGE, fill: BRAND_ORANGE }} />
+                                <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-2">
+                                    <Icon name="zap" className="w-4 h-4 text-white mb-0.5" />
+                                    <span className="text-[8px] font-black leading-tight text-white uppercase">New Technology Introduction</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Header Section */}
+                        <header className="mb-12 text-left animate-in max-w-4xl">
+                            <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-slate-400 flex flex-wrap gap-x-3 items-baseline mb-4">
+                                <span className="text-slate-800">HMI</span> 
+                                <span>Four Core Principles</span>
+                            </h1>
+                            <div className="h-1 w-24 rounded-full" style={{ backgroundColor: BRAND_ORANGE }}></div>
+                        </header>
+
+                        {/* Interactive Grid */}
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start mb-12">
+                            
+                            {/* List of Principles */}
+                            <div className="lg:col-span-5 space-y-4">
+                                {principles.map((principle) => (
+                                    <button
+                                        key={principle.id}
+                                        onClick={() => setActiveCard(activeCard === principle.id ? null : principle.id)}
+                                        className={`w-full text-left p-6 rounded-xl border-2 transition-all duration-300 transform group ${
+                                            activeCard === principle.id 
+                                                ? 'bg-white shadow-lg scale-[1.02]' 
+                                                : 'bg-white border-slate-100 hover:shadow-md'
+                                        }`}
+                                        style={{ 
+                                            borderColor: activeCard === principle.id ? BRAND_ORANGE : undefined,
+                                            boxShadow: activeCard === principle.id ? `0 10px 15px -3px ${BRAND_ORANGE}33` : undefined
+                                        }}
+                                    >
+                                        <div className="flex items-center justify-between gap-4">
+                                            <div className="flex items-center gap-4">
+                                                <div 
+                                                    className={`p-3 rounded-lg transition-colors duration-300 flex items-center justify-center`}
+                                                    style={{ backgroundColor: activeCard === principle.id ? `${BRAND_ORANGE}1a` : '#f8fafc' }}
+                                                >
+                                                    <span className="font-bold text-lg mr-3" style={{ color: BRAND_ORANGE }}>{principle.id}.</span>
+                                                    <Icon name={principle.icon} className="w-6 h-6" style={{ color: BRAND_ORANGE }} />
+                                                </div>
+                                                <div>
+                                                    <h3 className="text-lg font-bold text-slate-800 leading-tight">{principle.title}</h3>
+                                                    <p className="text-slate-500 text-xs mt-0.5">{principle.subtitle}</p>
+                                                </div>
+                                            </div>
+                                            <Icon name="chevron-right" 
+                                                className={`w-5 h-5 transition-transform duration-300 ${activeCard === principle.id ? 'rotate-90' : 'group-hover:translate-x-1 text-slate-300'}`} 
+                                                style={{ color: activeCard === principle.id ? BRAND_ORANGE : undefined }}
+                                            />
+                                        </div>
+                                        
+                                        {activeCard === principle.id && (
+                                            <div className="mt-4 lg:hidden">
+                                                <p className="text-slate-600 mb-4 leading-relaxed">{principle.mainText}</p>
+                                                <div 
+                                                    className="p-3 rounded-lg font-bold text-sm mb-4"
+                                                    style={{ backgroundColor: `${BRAND_ORANGE}1a`, color: BRAND_ORANGE }}
+                                                >
+                                                    {principle.callout}
+                                                </div>
+                                                <ul className="space-y-2">
+                                                    {principle.bullets.map((bullet, idx) => (
+                                                        <li key={idx} className="flex items-start gap-3 text-slate-500 text-xs">
+                                                            <div className="w-1.5 h-1.5 rounded-full mt-1 shrink-0" style={{ backgroundColor: BRAND_ORANGE }} />
+                                                            {bullet}
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+                                    </button>
+                                ))}
+                            </div>
+
+                            {/* Desktop Detail View */}
+                            <div className="hidden lg:block lg:col-span-7 sticky top-8">
+                                <div 
+                                    className={`min-h-[480px] rounded-2xl border-2 p-10 transition-all duration-500 bg-white ${
+                                        activeCard ? 'shadow-2xl' : 'border-slate-200 border-dashed'
+                                    }`}
+                                    style={{ 
+                                        borderColor: activeCard ? BRAND_ORANGE : undefined,
+                                        boxShadow: activeCard ? `0 25px 50px -12px ${BRAND_ORANGE}33` : undefined
+                                    }}
+                                >
+                                    {activeCard ? (
+                                        <div className="animate-in">
+                                            <div className="flex items-center gap-6 mb-8">
+                                                <span className="text-5xl font-black opacity-10 leading-none" style={{ color: BRAND_ORANGE }}>{activeCard}</span>
+                                                <div>
+                                                    <h2 className="text-3xl font-bold text-slate-800 leading-tight">
+                                                        {principles.find(p => p.id === activeCard).title}
+                                                    </h2>
+                                                    <p className="font-medium uppercase tracking-widest text-xs mt-1" style={{ color: BRAND_ORANGE }}>Four Core Principle Directive</p>
+                                                </div>
+                                            </div>
+
+                                            <div className="space-y-8">
+                                                <p className="text-xl text-slate-700 leading-relaxed font-light">
+                                                    {principles.find(p => p.id === activeCard).mainText}
+                                                </p>
+
+                                                <div 
+                                                    className="flex items-center gap-3 py-4 px-6 rounded-xl text-white shadow-lg"
+                                                    style={{ backgroundColor: BRAND_ORANGE, boxShadow: `0 10px 15px -3px ${BRAND_ORANGE}66` }}
+                                                >
+                                                    <Icon name="zap" className="w-5 h-5 shrink-0" />
+                                                    <span className="text-lg font-bold">{principles.find(p => p.id === activeCard).callout}</span>
+                                                </div>
+
+                                                <div className="grid grid-cols-1 gap-4">
+                                                    {principles.find(p => p.id === activeCard).bullets.map((bullet, idx) => (
+                                                        <div key={idx} className="flex gap-4 p-4 rounded-xl bg-slate-50 border border-slate-100 hover:border-orange-200 transition-colors">
+                                                            <div className="w-2 h-2 rounded-full mt-2 shrink-0" style={{ backgroundColor: BRAND_ORANGE }} />
+                                                            <p className="text-slate-600 text-sm font-medium">{bullet}</p>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="flex flex-col items-center justify-center h-full text-center space-y-6">
+                                            <div className="w-20 h-20 rounded-full bg-slate-50 flex items-center justify-center text-slate-300">
+                                                <Icon name="compass" className="w-10 h-10" />
+                                            </div>
+                                            <div className="max-w-xs">
+                                                <h3 className="text-xl font-bold text-slate-400">Select a Principle</h3>
+                                                <p className="text-slate-400 text-sm mt-2">Choose a guideline from the left to explore the HMI team's methodology.</p>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Orange Team Goals Bar */}
+                        <div 
+                            className="rounded-xl p-6 md:p-8 shadow-xl mb-12"
+                            style={{ backgroundColor: BRAND_ORANGE, boxShadow: `0 20px 25px -5px ${BRAND_ORANGE}4d` }}
+                        >
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-y-4 gap-x-8">
+                                {teamGoals.map((goal, idx) => (
+                                    <div key={idx} className="flex items-center gap-3 text-white">
+                                        <div className="p-1 rounded-full bg-white/20 shrink-0">
+                                            <div className="w-2 h-2 rounded-full bg-teal-300" />
+                                        </div>
+                                        <span className="text-sm md:text-base font-semibold leading-snug">{goal.text}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Footer Section */}
+                        <footer className="flex flex-col md:flex-row justify-between items-center gap-6 pt-8 border-t border-slate-200">
+                            <div className="flex items-center gap-4">
+                                <div 
+                                    className="flex items-center gap-2 px-3 py-1.5 rounded border bg-white text-[10px] font-bold tracking-widest uppercase"
+                                    style={{ borderColor: `${BRAND_ORANGE}33`, color: BRAND_ORANGE }}
+                                >
+                                    <Icon name="shield-alert" className="w-3 h-3" />
+                                    Confidential
+                                </div>
+                                <span className="text-slate-400 text-sm font-medium">Grant</span>
+                            </div>
+                            
+                            <div className="flex items-center gap-2 text-slate-300 hover:text-orange-500 transition-colors cursor-pointer group">
+                                <span 
+                                    className="text-xs font-bold uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity"
+                                    style={{ color: BRAND_ORANGE }}
+                                >
+                                    HMI Systems
+                                </span>
+                                <Icon name="box" className="w-6 h-6 group-hover:text-[#ff8b00]" />
+                            </div>
+                        </footer>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"> 
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UTS & Sweep Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; color: #e5e5e5; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        canvas { display: block; cursor: grab; }
+        canvas:active { cursor: grabbing; }
+        .sidebar {
+            background: rgba(30, 30, 30, 0.95);
+            backdrop-filter: blur(10px);
+            border-right: 1px solid #333;
+        }
+        .sidebar-transition { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        /* Scrollbar styling */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+    </style>
+</head>
+<body class="relative h-screen w-screen overflow-hidden text-sm bg-gray-900">
+
+    <!-- Canvas Layer (Background - Full Screen) -->
+    <div class="absolute inset-0 z-0">
+        <canvas id="gridCanvas" class="w-full h-full"></canvas>
+        
+        <!-- Floating Tooltip -->
+        <div id="tooltip" class="absolute pointer-events-none hidden bg-black/90 text-white px-3 py-2 rounded border border-gray-600 shadow-xl text-xs z-30 whitespace-nowrap">
+        </div>
+
+        <!-- Top Right Info Container -->
+        <div class="absolute top-4 right-4 flex flex-col items-end space-y-2 pointer-events-none select-none z-10">
+            <!-- Title Label -->
+            <div class="text-gray-400 text-sm font-bold bg-gray-900/50 px-3 py-1 rounded border border-gray-700/50 backdrop-blur-sm">
+                On Machine test, 323 - Large Targets
+            </div>
+            
+            <!-- Error Stats Legend -->
+            <div id="error-stats" class="bg-gray-900/50 px-3 py-2 rounded border border-gray-700/50 backdrop-blur-sm text-right text-xs font-mono text-gray-300">
+                <!-- JS will populate this -->
+            </div>
+        </div>
+
+        <!-- Overlay Info -->
+        <div class="absolute bottom-4 right-4 text-gray-500 text-xs font-mono pointer-events-none select-none z-10">
+            Grid Unit: <span id="grid-scale-display">100</span>mm
+        </div>
+    </div>
+
+    <!-- Toggle Button -->
+    <button id="sidebarToggle" onclick="toggleSidebar()" class="absolute left-80 top-4 z-20 bg-gray-800 text-gray-200 p-2 rounded-r-md border border-l-0 border-gray-600 hover:bg-gray-700 hover:text-white transition-all shadow-xl flex items-center justify-center w-8 h-10 sidebar-transition" title="Toggle Sidebar">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+        </svg>
+    </button>
+
+    <!-- Sidebar Panel (Overlay) -->
+    <div id="sidebar" class="sidebar absolute top-0 left-0 w-80 h-full z-10 shadow-2xl transform translate-x-0 sidebar-transition flex flex-col">
+        <div class="p-5 border-b border-gray-700">
+            <h1 class="text-xl font-bold text-white mb-1"><span class="text-blue-400">UTS</span> & <span class="text-yellow-400">Sweep</span></h1>
+            <p class="text-gray-400 text-xs">Multi-Set Coordinate Visualizer</p>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-5 space-y-6" id="sidebar-content">
+            <!-- JS will populate datasets here -->
+        </div>
+
+        <div class="p-4 border-t border-gray-700 bg-gray-800/50">
+            <div class="mb-3 text-xs text-gray-400">
+                <h3 class="font-semibold mb-1 text-gray-300">Controls</h3>
+                <ul class="list-disc pl-4 space-y-0.5">
+                    <li><strong>Pan:</strong> Click & Drag</li>
+                    <li><strong>Zoom:</strong> Mouse Wheel</li>
+                </ul>
+            </div>
+            
+            <!-- Added Alignment Toggle YES-->
+            <div class="mb-3 pt-3 border-t border-gray-700/50 space-y-2">
+                <!-- Anchor Selection -->
+                <div class="pb-2 mb-2 border-b border-gray-700/50">
+                    <label class="block text-xs text-gray-400 mb-1">Grid Origin Anchor</label>
+                    <select id="anchorSelect" onchange="applyTransformations()" class="w-full bg-gray-700 text-white text-xs rounded border border-gray-600 px-2 py-1 focus:outline-none focus:border-blue-500">
+                        <option value="CBot">Anchor: CBot (0,0)</option>
+                        <option value="VBot" selected>Anchor: VBot (Steady V-Pair)</option>
+                    </select>
+                </div>
+
+                <label class="flex items-center space-x-2 text-xs text-gray-300 cursor-pointer select-none hover:text-white transition-colors">
+                    <input type="checkbox" id="alignToggle" class="form-checkbox bg-gray-700 border-gray-600 rounded text-yellow-500 focus:ring-0 focus:ring-offset-0" onchange="applyTransformations()">
+                    <span>Align Sweep Vertically (V-Pair)</span>
+                </label>
+                <label class="flex items-center space-x-2 text-xs text-gray-300 cursor-pointer select-none hover:text-white transition-colors">
+                    <input type="checkbox" id="scaleToggle" class="form-checkbox bg-gray-700 border-gray-600 rounded text-yellow-500 focus:ring-0 focus:ring-offset-0" onchange="applyTransformations()">
+                    <span>Scale Sweep to Match UTS V-Pair</span>
+                </label>
+                <label class="flex items-center space-x-2 text-xs text-blue-300 cursor-pointer select-none hover:text-blue-100 transition-colors">
+                    <input type="checkbox" id="utsScaleToggle" class="form-checkbox bg-gray-700 border-gray-600 rounded text-blue-500 focus:ring-0 focus:ring-offset-0" onchange="applyTransformations()">
+                    <span>Normalize UTS Pairs to V-Pair Length</span>
+                </label>
+                <label class="flex items-center space-x-2 text-xs text-yellow-300 cursor-pointer select-none hover:text-yellow-100 transition-colors">
+                    <input type="checkbox" id="sweepScaleToggle" class="form-checkbox bg-gray-700 border-gray-600 rounded text-yellow-500 focus:ring-0 focus:ring-offset-0" onchange="applyTransformations()">
+                    <span>Normalize Sweep Pairs to V-Pair Length</span>
+                </label>
+            </div>
+
+            <button onclick="resetView()" class="w-full bg-gray-700 hover:bg-gray-600 text-white py-2 rounded transition font-medium shadow-lg border border-gray-600">
+                Reset View
+            </button>
+        </div>
+    </div>
+
+<script>
+    // --- Data Configuration ---
+    const dataSets = {
+        "UTS": {
+            color: '#3b82f6', // Blue-500
+            displayColor: 'text-blue-400',
+            points: {
+                CBot: { x: 0, y: 0 },
+                CTop: { x: -394, y: 1597 },
+                EBot: { x: -2267, y: 105 },
+                ETop: { x: -1261, y: 1409 },
+                VBot: { x: -701, y: -329 },
+                VTop: { x: -696, y: 1316 }
+            }
+        },
+        "Sweep": {
+            color: '#facc15', // Yellow-400
+            displayColor: 'text-yellow-400',
+            points: {
+                CTop: { x: 60.50754, y: -971.53424 },
+                CBot: { x: -306.93802, y: -236.93155 },
+                ETop: { x: 467.87228, y: -786.4633 },
+                EBot: { x: 817.0387, y: -40.853474 },
+                VTop: { x: 181.07524, y: -802.8192 },
+                VBot: { x: 0.6395335, y: 0.75508994 }
+            }
+        }
+    };
+
+    // Store original Data for resetting
+    const originalUTSPoints = JSON.parse(JSON.stringify(dataSets.UTS.points));
+    const originalSweepPoints = JSON.parse(JSON.stringify(dataSets.Sweep.points));
+
+    // Define the logical pairs for calculation
+    const pairPatterns = [
+        { start: 'CBot', end: 'CTop', label: 'C-Pair' },
+        { start: 'EBot', end: 'ETop', label: 'E-Pair' },
+        { start: 'VBot', end: 'VTop', label: 'V-Pair' }
+    ];
+
+    // --- State Management ---
+    const canvas = document.getElementById('gridCanvas');
+    const ctx = canvas.getContext('2d');
+    const tooltip = document.getElementById('tooltip');
+
+    let state = {
+        scale: 0.35, 
+        offsetX: 600, 
+        offsetY: 600,
+        isDragging: false,
+        lastMouseX: 0,
+        lastMouseY: 0,
+        hoveredPoint: null
+    };
+
+    // --- Math Helpers ---
+    function worldToScreen(wx, wy) {
+        return {
+            x: (wx * state.scale) + state.offsetX + canvas.width / 2,
+            y: (-wy * state.scale) + state.offsetY + canvas.height / 2
+        };
+    }
+
+    function screenToWorld(sx, sy) {
+        return {
+            x: (sx - state.offsetX - canvas.width / 2) / state.scale,
+            y: -(sy - state.offsetY - canvas.height / 2) / state.scale
+        };
+    }
+
+    function getDistance(p1, p2) {
+        return Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+    }
+
+    function toggleSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        const btn = document.getElementById('sidebarToggle');
+        const isClosed = sidebar.classList.contains('-translate-x-full');
+        
+        if (isClosed) {
+            sidebar.classList.remove('-translate-x-full');
+            btn.style.left = '20rem'; // Matches w-80 (20rem)
+            btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>`;
+        } else {
+            sidebar.classList.add('-translate-x-full');
+            btn.style.left = '0';
+            btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>`;
+        }
+    }
+
+    // --- Transformation Logic ---
+    function applyTransformations() {
+        const isAlign = document.getElementById('alignToggle').checked;
+        const isScale = document.getElementById('scaleToggle').checked;
+        const isUtsScale = document.getElementById('utsScaleToggle').checked;
+        const isSweepScale = document.getElementById('sweepScaleToggle').checked;
+        const anchorType = document.getElementById('anchorSelect').value;
+
+        // Helper function for symmetric scaling
+        // Expands/Contracts p1 and p2 equally from their midpoint
+        function symmetricScale(p1, p2, targetDist) {
+            const currentDist = getDistance(p1, p2);
+            if (currentDist === 0) return;
+
+            const scaleRatio = targetDist / currentDist;
+            
+            // Calculate Midpoint
+            const midX = (p1.x + p2.x) / 2;
+            const midY = (p1.y + p2.y) / 2;
+
+            // Calculate half vector (Mid to Point)
+            const halfVecX = (p2.x - p1.x) / 2;
+            const halfVecY = (p2.y - p1.y) / 2;
+
+            // Scale the half vector
+            const newHalfX = halfVecX * scaleRatio;
+            const newHalfY = halfVecY * scaleRatio;
+
+            // Apply new positions
+            p2.x = midX + newHalfX; // Top moves out/in
+            p2.y = midY + newHalfY;
+
+            p1.x = midX - newHalfX; // Bottom moves out/in equally
+            p1.y = midY - newHalfY;
+        }
+        
+        // --- 1. HANDLE UTS TRANSFORMATIONS ---
+        let utsPoints = JSON.parse(JSON.stringify(originalUTSPoints));
+        
+        if (isUtsScale) {
+            const targetDist = getDistance(originalUTSPoints.VBot, originalUTSPoints.VTop);
+            symmetricScale(utsPoints.CBot, utsPoints.CTop, targetDist);
+            symmetricScale(utsPoints.EBot, utsPoints.ETop, targetDist);
+        }
+        dataSets.UTS.points = utsPoints;
+
+
+        // --- 2. HANDLE SWEEP TRANSFORMATIONS ---
+        let points = JSON.parse(JSON.stringify(originalSweepPoints));
+
+        // LOCAL NORMALIZATION PHASE
+        if (isSweepScale) {
+            const targetDist = getDistance(points.VBot, points.VTop);
+            symmetricScale(points.CBot, points.CTop, targetDist);
+            symmetricScale(points.EBot, points.ETop, targetDist);
+        }
+
+        // GLOBAL SCALING PHASE
+        if (isScale) {
+            const utsDist = getDistance(originalUTSPoints.VBot, originalUTSPoints.VTop);
+            const sweepDist = getDistance(originalSweepPoints.VBot, originalSweepPoints.VTop);
+            const scaleFactor = utsDist / sweepDist;
+
+            for (const key in points) {
+                points[key].x *= scaleFactor;
+                points[key].y *= scaleFactor;
+            }
+        }
+
+        // ALIGNMENT PHASE
+        if (isAlign) {
+            const vBot = points.VBot;
+            const vTop = points.VTop;
+            
+            // Calculate Rotation to Vertical
+            const currentAngle = Math.atan2(vTop.y - vBot.y, vTop.x - vBot.x);
+            const targetAngle = Math.PI / 2;
+            const delta = targetAngle - currentAngle;
+            
+            // Rotate all points around VBot
+            const rotatedPoints = {};
+            for (const [name, pt] of Object.entries(points)) {
+                const tempX = pt.x - vBot.x;
+                const tempY = pt.y - vBot.y;
+                
+                const rx = tempX * Math.cos(delta) - tempY * Math.sin(delta);
+                const ry = tempX * Math.sin(delta) + tempY * Math.cos(delta);
+                
+                rotatedPoints[name] = {
+                    x: rx + vBot.x,
+                    y: ry + vBot.y
+                };
+            }
+            points = rotatedPoints;
+
+            // Translate based on Anchor
+            let shiftX = 0;
+            let shiftY = 0;
+
+            if (anchorType === 'CBot') {
+                // Shift so CBot is at 0,0
+                const currentCBot = points['CBot'];
+                shiftX = -currentCBot.x;
+                shiftY = -currentCBot.y;
+            } else if (anchorType === 'VBot') {
+                // Shift so VBot is at UTS VBot position (or kept at relative origin if simpler)
+                // Let's align VBot to the UTS VBot position to enable easy comparison
+                const targetVBot = dataSets.UTS.points.VBot; 
+                // Or if we want VBot at 0,0? Let's assume user just wants stability.
+                // Best stability for V-Pair is usually locking VBot to a fixed point.
+                // Let's lock it to the UTS VBot for overlay comparison.
+                const currentVBot = points['VBot'];
+                shiftX = targetVBot.x - currentVBot.x;
+                shiftY = targetVBot.y - currentVBot.y;
+            }
+
+            for (const key in points) {
+                points[key].x = points[key].x + shiftX;
+                points[key].y = points[key].y + shiftY;
+            }
+        } 
+        
+        dataSets.Sweep.points = points;
+
+        populateUI();
+        draw();
+    }
+
+    // --- Initialization ---
+    function init() {
+        resizeCanvas();
+        applyTransformations(); // Initialize with default transformations/anchors
+        centerView();
+        
+        window.addEventListener('resize', resizeCanvas);
+        canvas.addEventListener('mousedown', handleMouseDown);
+        window.addEventListener('mousemove', handleMouseMove);
+        window.addEventListener('mouseup', handleMouseUp);
+        canvas.addEventListener('wheel', handleWheel, { passive: false });
+
+        requestAnimationFrame(draw);
+    }
+
+    function populateUI() {
+        const container = document.getElementById('sidebar-content');
+        container.innerHTML = ''; // Clear existing
+
+        // --- Calculate Max Errors (New Logic) ---
+        let maxErrX = 0;
+        let maxErrY = 0;
+
+        // Iterate through all points to find max deviations
+        for (const key in dataSets.UTS.points) {
+            const utsP = dataSets.UTS.points[key];
+            const sweepP = dataSets.Sweep.points[key];
+            
+            if (utsP && sweepP) {
+                const diffX = Math.abs(sweepP.x - utsP.x);
+                const diffY = Math.abs(sweepP.y - utsP.y);
+                
+                if (diffX > maxErrX) maxErrX = diffX;
+                if (diffY > maxErrY) maxErrY = diffY;
+            }
+        }
+
+        // Update the Top Right Stats Box
+        const statsBox = document.getElementById('error-stats');
+        statsBox.innerHTML = `
+            <div class="mb-1">Max Reach Error (X): <span class="text-red-400 font-bold">${Math.round(maxErrX)}</span></div>
+            <div>Max Height Error (Y): <span class="text-red-400 font-bold">${Math.round(maxErrY)}</span></div>
+        `;
+
+        // --- Existing Sidebar Logic ---
+        for (const [setName, setInfo] of Object.entries(dataSets)) {
+            const section = document.createElement('div');
+            section.className = "mb-8";
+
+            // Header
+            const header = document.createElement('div');
+            header.className = `text-sm font-bold uppercase tracking-wider mb-3 flex items-center ${setInfo.displayColor}`;
+            header.innerHTML = `<span class="w-3 h-3 rounded-full mr-2" style="background:${setInfo.color}"></span> ${setName} Data`;
+            section.appendChild(header);
+
+            // Distances
+            const distCard = document.createElement('div');
+            distCard.className = "bg-gray-800 rounded-lg p-3 border border-gray-700 mb-4";
+            let distHtml = '';
+            
+            pairPatterns.forEach(pair => {
+                const p1 = setInfo.points[pair.start];
+                const p2 = setInfo.points[pair.end];
+                if(p1 && p2) {
+                    const dist = getDistance(p1, p2).toFixed(1);
+                    distHtml += `
+                        <div class="flex justify-between items-center py-1 border-b border-gray-700/50 last:border-0">
+                            <span class="text-xs text-gray-400">${pair.label}</span>
+                            <span class="font-mono text-sm font-bold text-gray-200">${dist}</span>
+                        </div>
+                    `;
+                }
+            });
+            distCard.innerHTML = distHtml;
+            section.appendChild(distCard);
+
+            // Coordinates Table
+            const coordCard = document.createElement('div');
+            coordCard.className = "bg-gray-800 rounded-lg p-3 border border-gray-700 overflow-hidden";
+            let coordHtml = `
+                <table class="w-full text-left border-collapse text-xs">
+                    <thead>
+                        <tr class="text-gray-500 border-b border-gray-600">
+                            <th class="pb-1 pl-1">Pt</th>
+                            <th class="pb-1 text-right">X</th>
+                            <th class="pb-1 text-right pr-1">Y</th>
+                        </tr>
+                    </thead>
+                    <tbody class="font-mono text-gray-300">
+            `;
+            
+            for (const [pName, pVal] of Object.entries(setInfo.points)) {
+                coordHtml += `
+                    <tr class="hover:bg-gray-700/50 transition-colors">
+                        <td class="py-1 pl-1 border-b border-gray-700/30">${pName}</td>
+                        <td class="py-1 text-right border-b border-gray-700/30 text-gray-400">${Math.round(pVal.x)}</td>
+                        <td class="py-1 text-right pr-1 border-b border-gray-700/30 text-gray-400">${Math.round(pVal.y)}</td>
+                    </tr>
+                `;
+            }
+            coordHtml += '</tbody></table>';
+            coordCard.innerHTML = coordHtml;
+            section.appendChild(coordCard);
+
+            container.appendChild(section);
+        }
+    }
+
+    function resizeCanvas() {
+        const parent = canvas.parentElement;
+        canvas.width = parent.clientWidth;
+        canvas.height = parent.clientHeight;
+        requestAnimationFrame(draw);
+    }
+
+    function centerView() {
+        // Calculate bounding box of ALL points in ALL sets
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        
+        Object.values(dataSets).forEach(set => {
+            Object.values(set.points).forEach(p => {
+                minX = Math.min(minX, p.x);
+                maxX = Math.max(maxX, p.x);
+                minY = Math.min(minY, p.y);
+                maxY = Math.max(maxY, p.y);
+            });
+        });
+
+        // Fallback if no data
+        if (minX === Infinity) { minX = -1000; maxX = 1000; minY = -1000; maxY = 1000; }
+
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+        const width = maxX - minX;
+        const height = maxY - minY;
+
+        const padding = 1.4; 
+        const scaleX = canvas.width / (Math.max(width, 100) * padding);
+        const scaleY = canvas.height / (Math.max(height, 100) * padding);
+        
+        state.scale = Math.min(scaleX, scaleY);
+        state.offsetX = -centerX * state.scale;
+        state.offsetY = centerY * state.scale;
+
+        requestAnimationFrame(draw);
+    }
+
+    function resetView() {
+        centerView();
+    }
+
+    // --- Interaction Handlers ---
+    function handleMouseDown(e) {
+        state.isDragging = true;
+        state.lastMouseX = e.clientX;
+        state.lastMouseY = e.clientY;
+        canvas.style.cursor = 'grabbing';
+    }
+
+    function handleMouseMove(e) {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        // Panning
+        if (state.isDragging) {
+            const dx = e.clientX - state.lastMouseX;
+            const dy = e.clientY - state.lastMouseY;
+            state.offsetX += dx;
+            state.offsetY += dy;
+            state.lastMouseX = e.clientX;
+            state.lastMouseY = e.clientY;
+            requestAnimationFrame(draw);
+        }
+
+        // Hover Detection
+        let found = null;
+        const threshold = 10; 
+
+        // Search all sets
+        for (const [setName, setInfo] of Object.entries(dataSets)) {
+            for (const [pName, p] of Object.entries(setInfo.points)) {
+                const screenPos = worldToScreen(p.x, p.y);
+                const dist = Math.hypot(screenPos.x - mouseX, screenPos.y - mouseY);
+                if (dist < threshold) {
+                    found = { setName, pName, ...p, sx: screenPos.x, sy: screenPos.y, color: setInfo.color };
+                }
+            }
+        }
+
+        state.hoveredPoint = found;
+
+        if (found) {
+            canvas.style.cursor = 'pointer';
+            tooltip.style.display = 'block';
+            tooltip.style.left = (e.clientX + 15) + 'px';
+            tooltip.style.top = (e.clientY + 15) + 'px';
+            tooltip.innerHTML = `
+                <span class="text-[10px] uppercase text-gray-400">${found.setName}</span><br>
+                <strong style="color:${found.color}">${found.pName}</strong><br>
+                X: ${found.x}<br>
+                Y: ${found.y}
+            `;
+        } else {
+            canvas.style.cursor = state.isDragging ? 'grabbing' : 'grab';
+            tooltip.style.display = 'none';
+        }
+        
+        requestAnimationFrame(draw);
+    }
+
+    function handleMouseUp() {
+        state.isDragging = false;
+        canvas.style.cursor = 'grab';
+    }
+
+    function handleWheel(e) {
+        e.preventDefault();
+        const zoomIntensity = 0.1;
+        const direction = e.deltaY < 0 ? 1 : -1;
+        const factor = 1 + (zoomIntensity * direction);
+
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        const worldBefore = screenToWorld(mouseX, mouseY);
+
+        const newScale = state.scale * factor;
+        if(newScale < 0.01 || newScale > 20) return; 
+        state.scale = newScale;
+
+        state.offsetX = mouseX - canvas.width / 2 - (worldBefore.x * state.scale);
+        state.offsetY = mouseY - canvas.height / 2 - (-worldBefore.y * state.scale);
+
+        document.getElementById('grid-scale-display').textContent = (100 / state.scale).toFixed(0);
+
+        requestAnimationFrame(draw);
+    }
+
+    // --- Rendering ---
+    function draw() {
+        // Clear Background
+        ctx.fillStyle = '#111827'; 
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        drawGrid();
+
+        // Draw Axes
+        const origin = worldToScreen(0, 0);
+        ctx.beginPath();
+        ctx.strokeStyle = '#4b5563'; 
+        ctx.lineWidth = 2;
+        ctx.moveTo(0, origin.y);
+        ctx.lineTo(canvas.width, origin.y);
+        ctx.moveTo(origin.x, 0);
+        ctx.lineTo(origin.x, canvas.height);
+        ctx.stroke();
+
+        // Loop through Data Sets
+        for (const [setName, setInfo] of Object.entries(dataSets)) {
+            
+            // 1. Draw Connecting Lines & Distances
+            pairPatterns.forEach(pair => {
+                const p1 = setInfo.points[pair.start];
+                const p2 = setInfo.points[pair.end];
+                if (!p1 || !p2) return;
+
+                const s1 = worldToScreen(p1.x, p1.y);
+                const s2 = worldToScreen(p2.x, p2.y);
+                const dist = getDistance(p1, p2).toFixed(1);
+
+                // Line
+                ctx.beginPath();
+                ctx.strokeStyle = setInfo.color;
+                ctx.globalAlpha = 0.4;
+                ctx.lineWidth = 1;
+                ctx.setLineDash([5, 5]);
+                ctx.moveTo(s1.x, s1.y);
+                ctx.lineTo(s2.x, s2.y);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.globalAlpha = 1.0;
+
+                // Distance Label
+                let midX = (s1.x + s2.x) / 2;
+                let midY = (s1.y + s2.y) / 2;
+
+                // Offset labels to prevent overlap: UTS Left, Sweep Right
+                if (setName === 'UTS') {
+                    midX -= 30; // Shift left
+                } else {
+                    midX += 30; // Shift right
+                }
+                
+                ctx.font = '10px monospace'; // Set font before measuring
+                const textWidth = ctx.measureText(dist).width + 6;
+
+                ctx.fillStyle = '#111827'; // Background for text
+                ctx.fillRect(midX - textWidth/2, midY - 8, textWidth, 16);
+                
+                ctx.fillStyle = setInfo.color;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(dist, midX, midY);
+            });
+
+            // 2. Draw Points
+            for (const [name, p] of Object.entries(setInfo.points)) {
+                const s = worldToScreen(p.x, p.y);
+                
+                // Hover Effect
+                const isHovered = state.hoveredPoint && 
+                                state.hoveredPoint.pName === name && 
+                                state.hoveredPoint.setName === setName;
+                
+                if (isHovered) {
+                    ctx.beginPath();
+                    ctx.fillStyle = setInfo.color;
+                    ctx.globalAlpha = 0.3;
+                    ctx.arc(s.x, s.y, 12, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.globalAlpha = 1.0;
+                }
+
+                // Dot
+                ctx.beginPath();
+                ctx.fillStyle = setInfo.color;
+                ctx.arc(s.x, s.y, 4, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Label Construction
+                ctx.fillStyle = setInfo.color; 
+                ctx.font = isHovered ? 'bold 12px sans-serif' : '11px sans-serif';
+                
+                let labelText = name;
+                let labelX = s.x;
+
+                // Position labels: UTS on Left, Sweep on Right to prevent overlap
+                if (setName === 'UTS') {
+                    ctx.textAlign = 'right';
+                    labelX = s.x - 12;
+                } else {
+                    ctx.textAlign = 'left';
+                    labelX = s.x + 12;
+                }
+                
+                // Add Difference (Delta) for Sweep points
+                if (setName === 'Sweep') {
+                    const utsPoint = dataSets.UTS.points[name];
+                    if (utsPoint) {
+                        // Calculate difference: Current Sweep - UTS
+                        const dx = Math.round(p.x - utsPoint.x);
+                        const dy = Math.round(p.y - utsPoint.y);
+                        
+                        // Format with signs for clarity
+                        const dxStr = dx >= 0 ? `+${dx}` : `${dx}`;
+                        const dyStr = dy >= 0 ? `+${dy}` : `${dy}`;
+                        
+                        labelText += ` (${dxStr}, ${dyStr})`;
+                    }
+                }
+
+                ctx.fillText(labelText, labelX, s.y + 4);
+            }
+        }
+    }
+
+    function drawGrid() {
+        const gridSize = 500; 
+        
+        ctx.beginPath();
+        ctx.strokeStyle = '#1f2937'; 
+        ctx.lineWidth = 1;
+
+        const topLeft = screenToWorld(0, 0);
+        const botRight = screenToWorld(canvas.width, canvas.height);
+
+        const startX = Math.floor(topLeft.x / gridSize) * gridSize;
+        const endX = Math.ceil(botRight.x / gridSize) * gridSize;
+        const startY = Math.floor(botRight.y / gridSize) * gridSize;
+        const endY = Math.ceil(topLeft.y / gridSize) * gridSize;
+
+        for (let x = startX; x <= endX; x += gridSize) {
+            const s = worldToScreen(x, 0);
+            ctx.moveTo(s.x, 0);
+            ctx.lineTo(s.x, canvas.height);
+            ctx.fillStyle = '#374151';
+            ctx.font = '10px monospace';
+            ctx.fillText(x, s.x + 2, canvas.height - 10);
+        }
+
+        for (let y = startY; y <= endY; y += gridSize) {
+            const s = worldToScreen(0, y);
+            ctx.moveTo(0, s.y);
+            ctx.lineTo(canvas.width, s.y);
+            ctx.fillStyle = '#374151';
+            ctx.font = '10px monospace';
+            ctx.fillText(y, 5, s.y - 2);
+        }
+
+        ctx.stroke();
+    }
+
+    // Start
+    init();
+
+</script>
+</body>
+</html>
