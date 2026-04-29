@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Rectilinear Lens Diagram</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .cursor-grab { cursor: grab; }
+        .cursor-grabbing { cursor: grabbing; }
+        .cursor-ns-resize { cursor: ns-resize; }
+        .no-select { user-select: none; -webkit-user-select: none; }
+        
+        .controls-input::-webkit-inner-spin-button, 
+        .controls-input::-webkit-outer-spin-button { 
+            -webkit-appearance: none; 
+            margin: 0; 
+        }
+    </style>
+</head>
+<body class="bg-gray-50 h-screen flex flex-col items-center justify-center overflow-hidden">
+
+    <div id="root" class="w-full h-full flex flex-col"></div>
+
+    <script type="text/babel">
+        const { useState, useRef, useEffect, useMemo } = React;
+
+        const OpticalDiagram = () => {
+            // --- Configuration Constants ---
+            const CANVAS_WIDTH = 1000;
+            const CANVAS_HEIGHT = 700;
+            const CENTER_Y = CANVAS_HEIGHT / 2;
+            
+            const OBJ_LINE_X_REF = 150; 
+            const LENS_X = 550;
+            const SENSOR_X = 850;
+            const CAMERA_BODY_START_X = 500;
+            
+            // Visual Geometry
+            const VISUAL_FOCAL_LENGTH = SENSOR_X - LENS_X; 
+
+            // Physical Constants
+            const TARGET_PHYSICAL_HEIGHT = 150; // mm
+
+            // --- State ---
+            const [target1, setTarget1] = useState({ x: 150, y: CENTER_Y });
+            const [target2, setTarget2] = useState({ x: 150, y: CENTER_Y + 100 }); 
+            
+            const [pivot, setPivot] = useState({ x: 550, y: 350 }); 
+            
+            const [snapToGrid, setSnapToGrid] = useState(true);
+            const [pathMode, setPathMode] = useState('linear'); 
+            const [rotationEnabled, setRotationEnabled] = useState(true); 
+            
+            // Dragging: 1, 2, 'pivot', 'sensor_1', 'sensor_2'
+            const [draggingId, setDraggingId] = useState(null); 
+            
+            // Editing State
+            // { id: 1|2, type: 'pixel'|'offset' }
+            const [editingInfo, setEditingInfo] = useState(null); 
+            const [editValue, setEditValue] = useState("");
+
+            // --- Camera Parameters ---
+            const [sensorRes, setSensorRes] = useState(3840); 
+            const [fov, setFov] = useState(92); 
+            const [targetDistMM, setTargetDistMM] = useState(700); 
+
+            const svgRef = useRef(null);
+
+            // --- Computed Values ---
+            
+            // 1. Calculate Physical Field of View Height (mm) at the target distance
+            const fovHeightMM = useMemo(() => {
+                const halfFovRad = (fov * Math.PI) / 360; 
+                return 2 * targetDistMM * Math.tan(halfFovRad);
+            }, [fov, targetDistMM]);
+
+            // 2. Dynamic Y-Scale (Pixels per MM)
+            const pixelsPerMM_Y = useMemo(() => {
+                const availableHeight = CANVAS_HEIGHT - 100; 
+                return availableHeight / Math.max(100, fovHeightMM);
+            }, [fovHeightMM]);
+
+            // 3. Dynamic Visual Target Size
+            const visualTargetHeight = Math.max(20, TARGET_PHYSICAL_HEIGHT * pixelsPerMM_Y);
+            const visualTargetWidth = 20;
+
+            // 4. X-Scale (Visual distance 400px = targetDistMM)
+            const pixelsPerMM_X = useMemo(() => {
+                const visualDist = LENS_X - OBJ_LINE_X_REF;
+                return visualDist / Math.max(1, targetDistMM);
+            }, [targetDistMM]);
+
+            // 5. Focal Length Calculations (Pixels only)
+            const focalLengthPx = useMemo(() => {
+                const halfFovRad = (fov * Math.PI) / 360; 
+                const tanHalfFov = Math.tan(halfFovRad);
+                const px = sensorRes / (2 * tanHalfFov);
+                return Math.round(px);
+            }, [fov, sensorRes]);
+
+            // 6. Curve Radius
+            const physRadiusMM = useMemo(() => {
+                const dxPx = OBJ_LINE_X_REF - pivot.x;
+                const dyPx = CENTER_Y - pivot.y;
+                const dxMM = dxPx / pixelsPerMM_X;
+                const dyMM = dyPx / pixelsPerMM_Y;
+                return Math.sqrt(dxMM*dxMM + dyMM*dyMM);
+            }, [pivot, pixelsPerMM_X, pixelsPerMM_Y]);
+
+            const visualRx = Math.abs(physRadiusMM * pixelsPerMM_X);
+            const visualRy = Math.abs(physRadiusMM * pixelsPerMM_Y);
+
+            // 7. Distance between targets (Vertical physical distance)
+            const distBetweenTargetsMM = useMemo(() => {
+                const dyPx = Math.abs(target1.y - target2.y);
+                const mm = dyPx / pixelsPerMM_Y;
+                return mm.toFixed(1);
+            }, [target1.y, target2.y, pixelsPerMM_Y]);
+
+            // 8. Pivot Offsets
+            const pivotDxMM = useMemo(() => Math.round((pivot.x - LENS_X) / pixelsPerMM_X), [pivot.x, pixelsPerMM_X]);
+            const pivotDyMM = useMemo(() => Math.round((CENTER_Y - pivot.y) / pixelsPerMM_Y), [pivot.y, pixelsPerMM_Y]);
+
+            // --- Helpers ---
+
+            const getMouseCoords = (e) => {
+                const CTM = svgRef.current.getScreenCTM();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                return {
+                    x: (clientX - CTM.e) / CTM.a,
+                    y: (clientY - CTM.f) / CTM.d
+                };
+            };
+
+            const calculateProjectionY = (objX, objY) => {
+                const slope = (CENTER_Y - objY) / (LENS_X - objX);
+                return CENTER_Y + slope * (SENSOR_X - LENS_X);
+            };
+
+            const rotatePoint = (x, y, cx, cy, angleDeg) => {
+                const angleRad = angleDeg * (Math.PI / 180);
+                const cos = Math.cos(angleRad);
+                const sin = Math.sin(angleRad);
+                const dx = x - cx;
+                const dy = y - cy;
+                return {
+                    x: cx + (dx * cos - dy * sin),
+                    y: cy + (dx * sin + dy * cos)
+                };
+            };
+
+            const calculateSensorPixelFromPoint = (visualX, visualY) => {
+                const physDistX = (LENS_X - visualX) / pixelsPerMM_X;
+                const physHeightY = (visualY - CENTER_Y) / pixelsPerMM_Y;
+                const theta = Math.atan2(physHeightY, physDistX);
+                
+                const halfFovRad = (fov * Math.PI) / 180 / 2;
+                const maxTan = Math.tan(halfFovRad);
+                
+                const ratio = Math.tan(theta) / maxTan;
+                
+                const centerPx = sensorRes / 2;
+                const pxOffset = ratio * centerPx;
+                
+                // 0 at Top, Max at Bottom
+                const absPx = centerPx + pxOffset;
+                return absPx; // Return Float for precision
+            };
+
+            const calculateVisualYFromPixel = (pixelVal, currentVisualX) => {
+                const centerPx = sensorRes / 2;
+                const pxOffset = pixelVal - centerPx;
+                const ratio = pxOffset / centerPx;
+
+                const halfFovRad = (fov * Math.PI) / 180 / 2;
+                const maxTan = Math.tan(halfFovRad);
+                const tanTheta = ratio * maxTan;
+
+                const physDistX = (LENS_X - currentVisualX) / pixelsPerMM_X;
+                const physHeightY = physDistX * tanTheta;
+
+                const visualY = CENTER_Y + (physHeightY * pixelsPerMM_Y);
+                return visualY;
+            };
+
+            const calculateObjYFromSensorY = (sensorY, objX) => {
+                const slope = (sensorY - CENTER_Y) / VISUAL_FOCAL_LENGTH;
+                const objY = CENTER_Y - slope * (LENS_X - objX);
+                return objY;
+            };
+
+            const calculateVisualYFromOffsetMM = (mmVal) => {
+                return CENTER_Y - (mmVal * pixelsPerMM_Y);
+            };
+
+            const getOffsetLabel = (y) => {
+                const deltaPx = CENTER_Y - y;
+                const mm = deltaPx / pixelsPerMM_Y;
+                const mmFixed = Math.abs(mm).toFixed(1);
+                const sign = mm === 0 ? "" : (mm > 0 ? "+" : "-");
+                return mm === 0 ? "0.0mm" : `${sign}${mmFixed}mm`;
+            };
+
+            const getOffsetValue = (y) => {
+                const deltaPx = CENTER_Y - y;
+                return (deltaPx / pixelsPerMM_Y);
+            };
+
+            const getDistanceToLensMM = (tx, ty) => {
+                const dxPx = tx - LENS_X;
+                const dyPx = ty - CENTER_Y;
+                const dxMM = dxPx / pixelsPerMM_X;
+                const dyMM = dyPx / pixelsPerMM_Y;
+                return Math.round(Math.sqrt(dxMM*dxMM + dyMM*dyMM));
+            };
+
+            // --- Stats ---
+            const stats = useMemo(() => {
+                const mmPerPx = fovHeightMM / sensorRes;
+                const dyPx = Math.abs(target1.y - target2.y);
+                const deltaMM = dyPx / pixelsPerMM_Y;
+                const p1 = calculateSensorPixelFromPoint(target1.x + 10, target1.y); 
+                const p2 = calculateSensorPixelFromPoint(target2.x + 10, target2.y);
+                const deltaPx = Math.abs(p1 - p2);
+
+                return {
+                    mmPerPx: mmPerPx.toFixed(4),
+                    deltaMM: deltaMM.toFixed(1),
+                    deltaPx: deltaPx.toFixed(1) // Keep precision here
+                };
+            }, [target1, target2, fovHeightMM, sensorRes, pixelsPerMM_Y, pixelsPerMM_X, fov]);
+
+
+            // --- Event Handlers ---
+
+            const handleStartDrag = (id, e) => {
+                if (editingInfo !== null) return;
+                e.preventDefault();
+                e.stopPropagation(); 
+                setDraggingId(id);
+            };
+
+            const handleMove = (e) => {
+                if (draggingId === null) return;
+                
+                const mouse = getMouseCoords(e);
+                
+                // Pivot Drag
+                if (draggingId === 'pivot') {
+                    const px = Math.max(0, Math.min(CANVAS_WIDTH, mouse.x));
+                    const py = Math.max(0, Math.min(CANVAS_HEIGHT, mouse.y));
+                    setPivot({ x: px, y: py });
+                    return;
+                }
+
+                // Sensor Bar Drag
+                if (draggingId === 'sensor_1' || draggingId === 'sensor_2') {
+                    const sensorY = Math.max(100, Math.min(CANVAS_HEIGHT-100, mouse.y));
+                    const target = draggingId === 'sensor_1' ? target1 : target2;
+                    const emissionX = target.x + visualTargetWidth / 2;
+                    const newObjY = calculateObjYFromSensorY(sensorY, emissionX);
+                    
+                    const clampedObjY = Math.max(20, Math.min(CANVAS_HEIGHT-20, newObjY));
+
+                    if (draggingId === 'sensor_1') setTarget1({ ...target1, y: clampedObjY });
+                    else setTarget2({ ...target2, y: clampedObjY });
+                    return;
+                }
+
+                // Target Drag
+                let newX = mouse.x;
+                let newY = mouse.y;
+
+                if (pathMode === 'linear') {
+                    newY = Math.max(visualTargetHeight/2, Math.min(CANVAS_HEIGHT - visualTargetHeight/2, newY));
+                    if (snapToGrid) {
+                        newX = OBJ_LINE_X_REF;
+                    } else {
+                        newX = Math.max(50, Math.min(LENS_X - 50, newX));
+                    }
+                } else {
+                    const dxPx = mouse.x - pivot.x;
+                    const dyPx = mouse.y - pivot.y;
+                    const dxMM = dxPx / pixelsPerMM_X;
+                    const dyMM = dyPx / pixelsPerMM_Y;
+                    const angle = Math.atan2(dyMM, dxMM);
+
+                    let radiusMM = Math.sqrt(dxMM*dxMM + dyMM*dyMM);
+
+                    if (snapToGrid) {
+                        radiusMM = physRadiusMM;
+                    } else {
+                         radiusMM = Math.max(50 / pixelsPerMM_Y, radiusMM); 
+                    }
+
+                    const newDxMM = radiusMM * Math.cos(angle);
+                    const newDyMM = radiusMM * Math.sin(angle);
+
+                    newX = pivot.x + newDxMM * pixelsPerMM_X;
+                    newY = pivot.y + newDyMM * pixelsPerMM_Y;
+                }
+
+                if (draggingId === 1) setTarget1({ x: newX, y: newY });
+                else setTarget2({ x: newX, y: newY });
+            };
+
+            const handleEndDrag = () => {
+                setDraggingId(null);
+            };
+
+            const toggleSnap = () => {
+                const newSnap = !snapToGrid;
+                setSnapToGrid(newSnap);
+                if (newSnap) {
+                    const snapPos = (curr) => {
+                        if (pathMode === 'linear') return { x: OBJ_LINE_X_REF, y: curr.y };
+                        const dxPx = curr.x - pivot.x;
+                        const dyPx = curr.y - pivot.y;
+                        const dxMM = dxPx / pixelsPerMM_X;
+                        const dyMM = dyPx / pixelsPerMM_Y;
+                        const angle = Math.atan2(dyMM, dxMM);
+                        const newDxMM = physRadiusMM * Math.cos(angle);
+                        const newDyMM = physRadiusMM * Math.sin(angle);
+                        return {
+                            x: pivot.x + newDxMM * pixelsPerMM_X,
+                            y: pivot.y + newDyMM * pixelsPerMM_Y
+                        };
+                    };
+                    setTarget1(prev => snapPos(prev));
+                    setTarget2(prev => snapPos(prev));
+                }
+            };
+
+            const toggleMode = () => {
+                const newMode = pathMode === 'linear' ? 'curved' : 'linear';
+                setPathMode(newMode);
+                setTarget1(prev => ({ ...prev, x: OBJ_LINE_X_REF }));
+                setTarget2(prev => ({ ...prev, x: OBJ_LINE_X_REF }));
+                if (newMode === 'curved' && pivot.x === 0) setPivot({x: LENS_X, y: CENTER_Y});
+            };
+
+            // --- Edit Handlers ---
+            const startEdit = (id, type, val) => {
+                setEditingInfo({ id, type });
+                setEditValue(val); 
+            };
+
+            const commitEdit = () => {
+                if (!editingInfo) return;
+                
+                const numVal = parseFloat(editValue);
+                if (!isNaN(numVal)) {
+                    const { id, type } = editingInfo;
+                    const currentTarget = id === 1 ? target1 : target2;
+                    let newY = currentTarget.y;
+
+                    if (type === 'pixel') {
+                        const emissionX = currentTarget.x + visualTargetWidth / 2;
+                        newY = calculateVisualYFromPixel(numVal, emissionX);
+                    } else if (type === 'offset') {
+                        newY = calculateVisualYFromOffsetMM(numVal);
+                    }
+                    
+                    if (id === 1) setTarget1(prev => ({ ...prev, y: newY }));
+                    else setTarget2(prev => ({ ...prev, y: newY }));
+                }
+                setEditingInfo(null);
+                setEditValue("");
+            };
+
+            // --- Rendering Data Calculation ---
+
+            const renderTargetData = (target, color, id) => {
+                let rotationDeg = 0;
+                
+                if (pathMode === 'curved' && rotationEnabled) {
+                    const dxPx = target.x - pivot.x;
+                    const dyPx = target.y - pivot.y;
+                    const dxMM = dxPx / pixelsPerMM_X;
+                    const dyMM = dyPx / pixelsPerMM_Y;
+                    const angleRad = Math.atan2(dyMM, dxMM);
+                    const angleDeg = angleRad * (180/Math.PI);
+                    rotationDeg = angleDeg + 180;
+                }
+
+                const halfW = visualTargetWidth / 2;
+                const halfH = visualTargetHeight / 2;
+                const localTopRight = { x: halfW, y: -halfH };
+                const localBotRight = { x: halfW, y: halfH };
+                const localCenterRight = { x: halfW, y: 0 }; 
+                const worldTopRight = rotatePoint(target.x + localTopRight.x, target.y + localTopRight.y, target.x, target.y, rotationDeg);
+                const worldBotRight = rotatePoint(target.x + localBotRight.x, target.y + localBotRight.y, target.x, target.y, rotationDeg);
+                const worldCenterRight = rotatePoint(target.x + localCenterRight.x, target.y + localCenterRight.y, target.x, target.y, rotationDeg);
+
+                const projTopY = calculateProjectionY(worldTopRight.x, worldTopRight.y);
+                const projBotY = calculateProjectionY(worldBotRight.x, worldBotRight.y);
+                const projCenterY = calculateProjectionY(worldCenterRight.x, worldCenterRight.y);
+
+                const centerPixelValRaw = calculateSensorPixelFromPoint(worldCenterRight.x, worldCenterRight.y);
+                const centerPixelVal = Math.round(centerPixelValRaw);
+
+                const topPixelVal = calculateSensorPixelFromPoint(worldTopRight.x, worldTopRight.y);
+                const botPixelVal = calculateSensorPixelFromPoint(worldBotRight.x, worldBotRight.y);
+                
+                const pxHeight = Math.abs(Math.round(topPixelVal) - Math.round(botPixelVal));
+                const offsetLabel = getOffsetLabel(target.y);
+                const offsetValue = getOffsetValue(target.y);
+                const distToLens = getDistanceToLensMM(worldCenterRight.x, worldCenterRight.y); 
+
+                const pathTop = `M ${worldTopRight.x},${worldTopRight.y} L ${LENS_X},${CENTER_Y} L ${SENSOR_X},${projTopY}`;
+                const pathBot = `M ${worldBotRight.x},${worldBotRight.y} L ${LENS_X},${CENTER_Y} L ${SENSOR_X},${projBotY}`;
+                const pathCenter = `M ${worldCenterRight.x},${worldCenterRight.y} L ${LENS_X},${CENTER_Y} L ${SENSOR_X},${projCenterY}`;
+
+                // Calculate Angle of Incidence in Degrees
+                const physDistX = (LENS_X - worldCenterRight.x) / pixelsPerMM_X;
+                const physHeightY = (worldCenterRight.y - CENTER_Y) / pixelsPerMM_Y;
+                const thetaRad = Math.atan2(physHeightY, physDistX);
+                const angleDeg = (thetaRad * 180 / Math.PI).toFixed(1);
+
+                return {
+                    id, cx: target.x, cy: target.y, rotation: rotationDeg,
+                    worldTop: worldTopRight, worldBot: worldBotRight, worldCenter: worldCenterRight,
+                    projTopY, projBotY, projCenterY,
+                    rayPathTop: pathTop, rayPathBot: pathBot, rayPathCenter: pathCenter,
+                    pxHeight, centerPixelVal, centerPixelValRaw, offsetLabel, offsetValue, distToLens, angleDeg, color
+                };
+            };
+
+            const t1Data = renderTargetData(target1, "#B5A2FF", 1);
+            const t2Data = renderTargetData(target2, "#FFEAA7", 2);
+
+            const getCurvedPathD = () => {
+                const startX = pivot.x + visualRx;
+                const startY = pivot.y;
+                const endX = pivot.x - visualRx;
+                const endY = pivot.y;
+                return `M ${startX} ${startY} A ${visualRx} ${visualRy} 0 1 0 ${endX} ${endY} A ${visualRx} ${visualRy} 0 1 0 ${startX} ${startY}`;
+            };
+
+            return (
+                <div 
+                    className="flex flex-col items-center justify-center w-full h-full bg-slate-50 select-none"
+                    onMouseMove={handleMove}
+                    onMouseUp={handleEndDrag}
+                    onTouchMove={handleMove}
+                    onTouchEnd={handleEndDrag}
+                    onMouseLeave={handleEndDrag}
+                >
+                    {/* Controls Header */}
+                    <div className="mb-2 flex flex-col items-center gap-3 z-10 w-full px-4">
+                        <div className="flex flex-col items-center">
+                            <h1 className="text-2xl font-bold text-gray-800">Interactive Rectilinear Lens Diagram</h1>
+                        </div>
+                        
+                        <div className="flex flex-wrap justify-center gap-4 items-center">
+                            {/* Toggles */}
+                            <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-full shadow-sm border">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" checked={snapToGrid} onChange={toggleSnap} className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 controls-input"/>
+                                    <span className="text-gray-700 font-medium text-sm">Snap to Path</span>
+                                </label>
+                            </div>
+
+                            <div className="flex items-center gap-2 bg-white px-1 py-1 rounded-full shadow-sm border">
+                                <button onClick={() => pathMode !== 'linear' && toggleMode()} className={`px-4 py-1 rounded-full text-sm font-medium transition-colors ${pathMode === 'linear' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-50'}`}>Linear</button>
+                                <button onClick={() => pathMode !== 'curved' && toggleMode()} className={`px-4 py-1 rounded-full text-sm font-medium transition-colors ${pathMode === 'curved' ? 'bg-orange-100 text-orange-700' : 'text-gray-500 hover:bg-gray-50'}`}>Curved</button>
+                            </div>
+
+                            {pathMode === 'curved' && (
+                                <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-full shadow-sm border animate-fade-in">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input type="checkbox" checked={rotationEnabled} onChange={() => setRotationEnabled(!rotationEnabled)} className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500 controls-input"/>
+                                        <span className="text-gray-700 font-medium text-sm">Rotate Targets</span>
+                                    </label>
+                                </div>
+                            )}
+
+                             {/* Camera Inputs */}
+                             <div className="flex flex-wrap justify-center items-center gap-3 bg-white px-4 py-2 rounded-lg shadow-sm border">
+                                <label className="flex items-center gap-2 text-sm text-gray-700 font-medium border-r pr-3">
+                                    <span>Target Dist (mm):</span>
+                                    <input type="number" value={targetDistMM} onChange={(e) => setTargetDistMM(Math.max(10, Number(e.target.value)))} step="100" className="w-16 px-1 py-1 border rounded text-right controls-input"/>
+                                </label>
+                                <label className="flex items-center gap-2 text-sm text-gray-700 font-medium border-r pr-3">
+                                    <span>Sensor H (px):</span>
+                                    <input type="number" value={sensorRes} onChange={(e) => setSensorRes(Number(e.target.value))} className="w-20 px-1 py-1 border rounded text-right controls-input"/>
+                                </label>
+                                <label className="flex items-center gap-2 text-sm text-gray-700 font-medium">
+                                    <span>Vertical FOV (°):</span>
+                                    <input type="number" value={fov} onChange={(e) => setFov(Number(e.target.value))} className="w-12 px-1 py-1 border rounded text-right controls-input"/>
+                                </label>
+                            </div>
+                        </div>
+
+                         {/* Calculated Info Display */}
+                         <div className="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-1 rounded-md text-sm font-semibold shadow-sm mt-1 flex flex-wrap gap-4 justify-center">
+                             <span>Focal Len: <span className="text-blue-900">{focalLengthPx} px</span></span>
+                             <span className="text-blue-300">|</span>
+                             <span>Targets Δ: <span className="text-blue-900">{distBetweenTargetsMM} mm</span></span>
+                             <span className="text-blue-300">|</span>
+                             <span>Δpx: <span className="text-blue-900">{stats.deltaPx} px</span></span>
+                             {pathMode === 'linear' && (
+                                <>
+                                    <span className="text-blue-300">|</span>
+                                    <span>Res: <span className="text-blue-900">{stats.mmPerPx} mm/px</span></span>
+                                </>
+                             )}
+                         </div>
+                    </div>
+
+                    <div className="relative shadow-xl border bg-white rounded-lg overflow-hidden" style={{ width: '90%', maxWidth: '1000px', aspectRatio: '10/7' }}>
+                        <svg 
+                            ref={svgRef}
+                            viewBox={`0 0 ${CANVAS_WIDTH} ${CANVAS_HEIGHT}`} 
+                            className="w-full h-full"
+                        >
+                            <defs>
+                                <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+                                    <polygon points="0 0, 10 3.5, 0 7" fill="#666" />
+                                </marker>
+                                <marker id="arrowhead-start" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto">
+                                    <polygon points="10 0, 0 3.5, 10 7" fill="#666" />
+                                </marker>
+                            </defs>
+
+                            {/* --- Camera Body --- */}
+                            <rect x={CAMERA_BODY_START_X} y="100" width={SENSOR_X - CAMERA_BODY_START_X} height={CANVAS_HEIGHT - 200} fill="none" stroke="#888" strokeWidth="2" />
+                            <rect x={LENS_X - 25} y={CENTER_Y - 100} width={50} height={200} fill="white" stroke="#444" strokeWidth="2" />
+                            <line x1={LENS_X} y1={CENTER_Y - 100} x2={LENS_X} y2={CENTER_Y + 100} stroke="#ddd" strokeDasharray="4"/>
+                            <circle cx={LENS_X} cy={CENTER_Y} r="3" fill="#444" />
+                            <text x={LENS_X + 100} y="160" textAnchor="middle" className="text-2xl font-bold fill-gray-600" style={{ fontSize: '32px' }}>Camera</text>
+                            <text x={LENS_X + 100} y="190" textAnchor="middle" className="text-sm fill-gray-500">Rectilinear Lens</text>
+
+                            {/* --- Sensor --- */}
+                            <line x1={SENSOR_X} y1="100" x2={SENSOR_X} y2={CANVAS_HEIGHT - 100} stroke="#666" strokeWidth="3" />
+                            <text 
+                                x={SENSOR_X + 25} 
+                                y={CENTER_Y} 
+                                textAnchor="middle" 
+                                className="text-lg fill-gray-400 select-none font-semibold tracking-wide" 
+                                style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
+                            >
+                                Sensor / Image
+                            </text>
+
+                            {/* --- PATH VISUALIZATION --- */}
+                            <g style={{ opacity: snapToGrid ? 1 : 0.4, transition: 'all 0.3s' }}>
+                                {pathMode === 'linear' ? (
+                                    <line x1={OBJ_LINE_X_REF} y1="0" x2={OBJ_LINE_X_REF} y2={CANVAS_HEIGHT} stroke="#FF9F43" strokeWidth="3" strokeDasharray="10, 10" />
+                                ) : (
+                                    <>
+                                        <path d={getCurvedPathD()} stroke="#FF9F43" strokeWidth="3" strokeDasharray="10, 10" fill="none" clipPath="inset(0 0 0 0)" />
+                                        <g transform={`translate(${pivot.x}, ${pivot.y})`} onMouseDown={(e) => handleStartDrag('pivot', e)} onTouchStart={(e) => handleStartDrag('pivot', e)} className="cursor-move group">
+                                            <circle r="15" fill="transparent" /> 
+                                            <circle r="6" fill="#3B82F6" className="group-hover:scale-125 transition-transform" />
+                                            <line x1="-8" y1="0" x2="8" y2="0" stroke="white" strokeWidth="2" />
+                                            <line x1="0" y1="-8" x2="0" y2="8" stroke="white" strokeWidth="2" />
+                                            <text x="12" y="4" className="text-xs font-bold fill-blue-600 select-none bg-white">Pivot</text>
+                                            
+                                            {/* Offset in mm */}
+                                            <text x="12" y="16" className="text-[10px] font-mono fill-gray-500 select-none bg-white/80">x: {pivotDxMM}mm</text>
+                                            <text x="12" y="26" className="text-[10px] font-mono fill-gray-500 select-none bg-white/80">y: {pivotDyMM}mm</text>
+                                        </g>
+                                    </>
+                                )}
+                            </g>
+
+                            {/* --- RAYS & PROJECTIONS --- */}
+                            {[t1Data, t2Data].map((data) => (
+                                <g key={data.id}>
+                                    {/* Distance Label along the ray path (no separate line) */}
+                                    <g transform={`translate(${(data.worldCenter.x + LENS_X)/2}, ${(data.worldCenter.y + CENTER_Y)/2})`}>
+                                        <text textAnchor="middle" y="-5" className="text-xs font-bold font-mono" fill={data.color === "#B5A2FF" ? "#7c64e3" : "#dcb344"} style={{ textShadow: '0px 0px 2px white' }}>d: {data.distToLens}mm</text>
+                                    </g>
+
+                                    {/* Rays */}
+                                    <path d={data.rayPathTop} stroke={data.color} strokeWidth="2" fill="none" style={{ opacity: 0.7 }} />
+                                    <path d={data.rayPathBot} stroke={data.color} strokeWidth="2" fill="none" style={{ opacity: 0.7 }} />
+                                    <polygon points={`${data.worldTop.x},${data.worldTop.y} ${LENS_X},${CENTER_Y} ${data.worldBot.x},${data.worldBot.y}`} fill={data.color} opacity="0.1" />
+                                    <polygon points={`${SENSOR_X},${data.projTopY} ${LENS_X},${CENTER_Y} ${SENSOR_X},${data.projBotY}`} fill={data.color} opacity="0.1" />
+                                    
+                                    {/* Center Ray */}
+                                    <path d={data.rayPathCenter} stroke="#ccc" strokeWidth="2" strokeDasharray="5,3" fill="none" />
+                                    <circle cx={SENSOR_X} cy={data.projCenterY} r="3" fill="#666" stroke="none" />
+                                    
+                                    {/* Sensor Projection Bar (Interactive) */}
+                                    <line 
+                                        x1={SENSOR_X} y1={data.projTopY} x2={SENSOR_X} y2={data.projBotY} 
+                                        stroke={data.color} strokeWidth="6" 
+                                        onMouseDown={(e) => handleStartDrag(data.id === 1 ? 'sensor_1' : 'sensor_2', e)}
+                                        onTouchStart={(e) => handleStartDrag(data.id === 1 ? 'sensor_1' : 'sensor_2', e)}
+                                        className="cursor-ns-resize hover:opacity-80 transition-opacity"
+                                    />
+                                    {/* Invisible larger hit area for sensor bar */}
+                                    <line 
+                                        x1={SENSOR_X} y1={data.projTopY} x2={SENSOR_X} y2={data.projBotY} 
+                                        stroke="transparent" strokeWidth="20" 
+                                        onMouseDown={(e) => handleStartDrag(data.id === 1 ? 'sensor_1' : 'sensor_2', e)}
+                                        onTouchStart={(e) => handleStartDrag(data.id === 1 ? 'sensor_1' : 'sensor_2', e)}
+                                        className="cursor-ns-resize"
+                                    />
+                                    
+                                    {/* Measurements */}
+                                    <g transform={`translate(${SENSOR_X + 60}, 0)`}>
+                                        <line x1="10" y1={data.projTopY} x2="10" y2={data.projBotY} stroke="#666" markerEnd="url(#arrowhead)" markerStart="url(#arrowhead-start)" />
+                                        <text x="25" y={(data.projTopY + data.projBotY)/2 + 5} className="text-sm fill-gray-700 font-mono font-bold bg-white/50 px-1">h: {data.pxHeight}px</text>
+                                    </g>
+                                    <g transform={`translate(${SENSOR_X - 10}, ${data.projCenterY})`}>
+                                        {/* EDITABLE PIXEL VALUE */}
+                                        {editingInfo?.id === data.id && editingInfo?.type === 'pixel' ? (
+                                            <foreignObject x="-70" y="-12" width="70" height="24">
+                                                <input 
+                                                    autoFocus
+                                                    type="number"
+                                                    step="1"
+                                                    value={editValue}
+                                                    onChange={(e) => setEditValue(e.target.value)}
+                                                    onBlur={commitEdit}
+                                                    onKeyDown={(e) => e.key === 'Enter' && commitEdit()}
+                                                    className="w-full h-full text-xs px-1 border border-blue-400 rounded text-right shadow-sm outline-none"
+                                                />
+                                            </foreignObject>
+                                        ) : (
+                                            <text 
+                                                x="0" 
+                                                y="4" 
+                                                textAnchor="end" 
+                                                className="text-xs fill-gray-600 font-mono bg-white bg-opacity-75 px-1 rounded font-bold cursor-pointer hover:fill-blue-600 select-none"
+                                                onClick={(e) => { e.stopPropagation(); startEdit(data.id, 'pixel', data.centerPixelVal); }}
+                                                title="Click to edit pixel value"
+                                            >
+                                                y: {data.centerPixelVal}px
+                                            </text>
+                                        )}
+                                        
+                                        {/* ANGLE LABEL BELOW */}
+                                        <text 
+                                            x="0" 
+                                            y="16" 
+                                            textAnchor="end" 
+                                            className="text-xs fill-gray-500 font-mono select-none"
+                                        >
+                                            ∠ {data.angleDeg}°
+                                        </text>
+                                    </g>
+                                </g>
+                            ))}
+
+                            {/* --- DRAGGABLE TARGETS --- */}
+                            {[t1Data, t2Data].map((data) => (
+                                <g key={data.id} transform={`translate(${data.cx}, ${data.cy}) rotate(${data.rotation})`} onMouseDown={(e) => handleStartDrag(data.id, e)} onTouchStart={(e) => handleStartDrag(data.id, e)} className={`${draggingId === data.id ? "cursor-grabbing" : "cursor-grab"} hover:opacity-90`}>
+                                    <rect x={-visualTargetWidth/2} y={-visualTargetHeight/2} width={visualTargetWidth} height={visualTargetHeight} fill="white" stroke="#666" strokeWidth="2" />
+                                    
+                                    {/* Offset Label (Editable) */}
+                                    {editingInfo?.id === data.id && editingInfo?.type === 'offset' ? (
+                                        <foreignObject x="-75" y="-10" width="60" height="24">
+                                            <input 
+                                                autoFocus
+                                                type="number"
+                                                step="1"
+                                                value={editValue}
+                                                onChange={(e) => setEditValue(e.target.value)}
+                                                onBlur={commitEdit}
+                                                onKeyDown={(e) => e.key === 'Enter' && commitEdit()}
+                                                className="w-full h-full text-xs px-1 border border-blue-400 rounded text-right shadow-sm outline-none"
+                                            />
+                                        </foreignObject>
+                                    ) : (
+                                        <text 
+                                            x={-15} 
+                                            y={5} 
+                                            textAnchor="end" 
+                                            className="text-sm font-bold fill-gray-700 pointer-events-auto cursor-pointer hover:fill-blue-600 select-none" 
+                                            style={{ textShadow: '0px 0px 4px white' }}
+                                            onClick={(e) => { e.stopPropagation(); startEdit(data.id, 'offset', data.offsetValue.toFixed(1)); }}
+                                            title="Click to edit offset (mm)"
+                                        >
+                                            {data.offsetLabel}
+                                        </text>
+                                    )}
+
+                                    <circle cx={visualTargetWidth/2} cy="0" r="2" fill="red" />
+                                    <line x1={-5} y1={-10} x2={5} y2={-10} stroke="#ddd" />
+                                    <line x1={-5} y1={0} x2={5} y2={0} stroke="#ddd" />
+                                    <line x1={-5} y1={10} x2={5} y2={10} stroke="#ddd" />
+                                    {draggingId === data.id && (
+                                        <rect x={-visualTargetWidth/2 - 4} y={-visualTargetHeight/2 - 4} width={visualTargetWidth + 8} height={visualTargetHeight + 8} fill="none" stroke={data.color} strokeWidth="2" strokeDasharray="4" rx="4" />
+                                    )}
+                                </g>
+                            ))}
+                        </svg>
+                        
+                        {pathMode === 'curved' && (
+                            <div className="absolute bottom-4 left-4 bg-white/90 p-2 rounded border text-xs text-blue-600 pointer-events-none">
+                                <i className="fas fa-info-circle mr-1"></i> Drag the blue Pivot point to change curvature
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<OpticalDiagram />);
+    </script>
+</body>
+</html>
